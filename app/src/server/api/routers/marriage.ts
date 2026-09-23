@@ -137,13 +137,12 @@ export const marriageRouter = createTRPCRouter({
     .meta({ mcp: { enabled: true, description: "Get list of married users" } })
     .input(z.object({ id: z.string().optional() }))
     .query(async ({ ctx, input }) => {
-      const associations = await fetchAssociations(
-        ctx.drizzle,
-        input.id ?? ctx?.userId ?? "",
-        ["MARRIAGE"],
-      );
+      // Anonymous callers (e.g. an expired session) have no user to look up
+      const userId = input.id ?? ctx?.userId;
+      if (!userId) return [];
+      const associations = await fetchAssociations(ctx.drizzle, userId, ["MARRIAGE"]);
       const marriedUsers = associations.map((x) =>
-        x.userOne.userId !== (input.id ?? ctx?.userId) ? x.userOne : x.userTwo,
+        x.userOne.userId !== userId ? x.userOne : x.userTwo,
       );
 
       return marriedUsers;
@@ -251,14 +250,14 @@ export const deleteAssociation = async (
  */
 export const fetchAssociations = async (
   client: DrizzleClient,
-  idOne?: string,
+  idOne: string,
   types?: UserAssociation[],
 ) => {
+  // An empty id would drop the user filter and return every association in the game
+  if (!idOne) return [];
   const results = await client.query.userAssociation.findMany({
     where: and(
-      ...(idOne
-        ? [or(eq(userAssociation.userOne, idOne), eq(userAssociation.userTwo, idOne))]
-        : []),
+      or(eq(userAssociation.userOne, idOne), eq(userAssociation.userTwo, idOne)),
       ...(types ? [inArray(userAssociation.associationType, types)] : []),
     ),
     with: {
